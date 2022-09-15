@@ -776,6 +776,20 @@ bool MgenFlow::SendMessage()
     }
 
     MgenMsg theMsg;
+
+    theMsg.SetChecksumEnabled(mgen.GetChecksumEnable());
+    if (mgen.GetIntegrityEnabled())
+    {
+        theMsg.SetIntegrity(mgen.GetIntegrityType(),
+                            mgen.GetIntegrityKey(),
+                            mgen.GetIntegrityKeyLen());
+    }
+    else
+    {
+        theMsg.SetIntegrityEnabled(false);
+    }
+    
+    
     theMsg.SetProtocol(protocol);
     unsigned int len = pattern.GetPktSize();
     theMsg.SetMgenMsgLen(len);
@@ -786,6 +800,7 @@ bool MgenFlow::SendMessage()
 #else
     theMsg.SetSeqNum(MgenSequencer::GetNextSequence(flow_id));
 #endif
+    theMsg.SetFragmentNum(0);
     struct timeval currentTime;
     ProtoSystemTime(currentTime);
 

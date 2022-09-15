@@ -5,6 +5,7 @@
 #include "mgenFlow.h"
 #include "mgenGlobals.h"
 #include "mgenMsg.h"
+#include "sha.h"
 
 class MgenController
 {
@@ -35,14 +36,14 @@ class DrecGroupList
     
     bool JoinGroup(Mgen&                     mgen,
                    const ProtoAddress&       groupAddress, 
-		   const ProtoAddress&       sourceAddress,
+                   const ProtoAddress&       sourceAddress,
                    const char*               interfaceName = NULL,
                    UINT16                    thePort = 0,
                    bool                      deferred = false);
     
     bool LeaveGroup(Mgen&                    mgen,
                     const ProtoAddress&      groupAddress,
-		    const ProtoAddress&      sourceAddress,
+                    const ProtoAddress&      sourceAddress,
                     const char*              interfaceName = NULL,
                     UINT16                   thePort = 0);
     
@@ -54,7 +55,7 @@ class DrecGroupList
         friend class DrecGroupList;
       public:
         DrecMgenTransport(const ProtoAddress&  groupAddr, 
-			  const ProtoAddress&  sourceAddr,
+                          const ProtoAddress&  sourceAddr,
                           const char*            interfaceName,
                           UINT16         thePort);
         ~DrecMgenTransport();
@@ -75,7 +76,7 @@ class DrecGroupList
       private:
         MgenTransport*          flow_transport;
         ProtoAddress            group_addr;
-	ProtoAddress            source_addr; // Source address used for SSM (src specific mcast)
+        ProtoAddress            source_addr; // Source address used for SSM (src specific mcast)
         char                    interface_name[16];
         UINT16          port;
         DrecMgenTransport*      prev;
@@ -83,7 +84,7 @@ class DrecGroupList
     };  // end class DrecGroupList::DrecMgenTransport
     
     DrecMgenTransport* FindMgenTransportByGroup(const ProtoAddress& groupAddr,
-						const ProtoAddress& sourceAddr,
+                                                const ProtoAddress& sourceAddr,
                                                 const char*           interfaceName = NULL,
                                                 UINT16        thePort = 0);
     
@@ -141,7 +142,8 @@ class Mgen
       TXCHECKSUM,// include checksums in transmitted MGEN messages
       RXCHECKSUM,// force checksum validation at receiver _always_
       QUEUE,     // Turn off tx_timer when pending queue exceeds this limit
-      REUSE      // Toggle socket reuse on and off
+      REUSE,     // Toggle socket reuse on and off
+      INTEGRITY  // Enable message integrity (HMAC)
     };
     static Command GetCommandFromString(const char* string);
     enum CmdType {CMD_INVALID, CMD_ARG, CMD_NOARG};
@@ -156,6 +158,12 @@ class Mgen
     bool OnCommand(Mgen::Command cmd, const char* arg, bool override = false);
     bool GetChecksumEnable() {return checksum_enable;}
     bool GetChecksumForce() {return checksum_force;}
+    
+    bool GetIntegrityEnabled() { return integrity_enable;}
+    SHAversion GetIntegrityType() { return integrity_which_sha; }
+    const unsigned char *GetIntegrityKey() { return (const unsigned char *) integrity_key; }
+    size_t GetIntegrityKeyLen() { return integrity_key_len; }
+        
     bool GetLogData() {return log_data;}
     bool GetLogGpsData() {return log_gps_data;}
     bool OpenLog(const char* path, bool append, bool binary);
@@ -200,13 +208,13 @@ class Mgen
         get_position_data = clientData;
     }
     void SetSinkPath(const char* theSinkPath) 
-	{
+    {
         strncpy(sink_path, theSinkPath, PATH_MAX);
-	}
+    }
     void SetSourcePath(const char* theSourcePath) 
-	{
+    {
 		strncpy(source_path, theSourcePath, PATH_MAX);
-	}
+    }
     void SetSinkBlocking(bool sinkNonBlocking) {sink_non_blocking = sinkNonBlocking;}
     void SetHostAddress(const ProtoAddress hostAddr)
     {
@@ -267,11 +275,11 @@ class Mgen
 
     bool LeaveGroup(MgenTransport* transport,
                     const ProtoAddress& groupAddress,
-		    const ProtoAddress& sourceAddress,
+                    const ProtoAddress& sourceAddress,
                     const char*           interfaceName = NULL);
-	    
+    
     MgenTransport* JoinGroup(const ProtoAddress&   groupAddress,
-			     const ProtoAddress&   sourceAddress,
+                             const ProtoAddress&   sourceAddress,
                              const char*           interfaceName,
                              UINT16                thePort);    
 
@@ -333,14 +341,14 @@ class Mgen
           tosValue;  
         default_tos_lock = override ? true : default_tos_lock;
     }
-	void SetDefaultTxBufferSize(unsigned int bufferSize, bool override)
+    void SetDefaultTxBufferSize(unsigned int bufferSize, bool override)
     {
         default_tx_buffer = default_tx_buffer_lock ?
           (override ? bufferSize : default_tx_buffer) :
           bufferSize;  
         default_tx_buffer_lock = override ? true : default_tx_buffer_lock;
     }
-	void SetDefaultRxBufferSize(unsigned int bufferSize, bool override)
+    void SetDefaultRxBufferSize(unsigned int bufferSize, bool override)
     {
         default_rx_buffer = default_rx_buffer_lock ?
           (override ? bufferSize : default_rx_buffer) :
@@ -366,6 +374,8 @@ class Mgen
         default_queue_limit_lock = override ? true : default_queue_limit_lock;
     }
 
+    int ReadKeyFromFile(const char *p_filename);
+
     // for mapping protocol types from script line fields
     static const StringMapper COMMAND_LIST[]; 
     
@@ -374,7 +384,7 @@ class Mgen
     void ProcessDrecEvent(const DrecEvent& event);
 
     // Common state
-	MgenController*    controller; // optional mgen controller
+    MgenController*    controller; // optional mgen controller
     ProtoSocket::Notifier&  socket_notifier;
 
     ProtoTimerMgr&     timer_mgr;
@@ -394,7 +404,7 @@ class Mgen
     bool               offset_pending; 
     bool               checksum_force;       // force checksum validation at rcvr
     UINT32             default_flow_label;
-    bool		       default_label_lock; 
+    bool               default_label_lock; 
 
     unsigned int       default_tx_buffer;                             
     unsigned int       default_rx_buffer;                             
@@ -419,9 +429,14 @@ class Mgen
     bool               log_data;
     bool               log_gps_data;
     ProtoAddress       host_addr;
-    bool               checksum_enable;       
+    bool               checksum_enable;
     
-	MgenFlowList       flow_list;
+    bool               integrity_enable;
+    SHAversion         integrity_which_sha;
+    unsigned char      integrity_key[USHAMaxHashSize];
+    size_t             integrity_key_len;
+    
+    MgenFlowList       flow_list;
     MgenTransportList  transport_list;
     
     // Drec state

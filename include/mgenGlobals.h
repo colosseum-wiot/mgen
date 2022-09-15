@@ -67,14 +67,23 @@ enum Protocol
 
 enum 
   {
-    MIN_SIZE = 28,
+    // For MIN_SIZE:
+    // 56 is full header assuming 4-byte dst and host IPv4 addresses
+    // 20 is HMAC-SHA1, 4 is CRC
+    // So in IPv4, MIN_SIZE should be 56+20+4
+    // For IPv6, addresses are 16 bytes, so MIN_SIZE should be 2*(16-4) bytes bigger,
+    // or 80+20+4
+    // Since MGEN supports both IPv4 and IPv6 concurrently, pick the bigger one
+    MIN_SIZE = 80+20+4+1,
     MAX_SIZE = 8192,
-    MSG_LEN_SIZE = 2,
-    // TX_BUFFER_SIZE is the tcp tx buffer size, for now same as udp max_size
-    TX_BUFFER_SIZE = 8192,
+    MSG_LEN_SIZE = 2,  // size of the length field that starts the on-wire message
     MAX_FRAG_SIZE = 65535, // TCP max fragment size
-    MIN_FRAG_SIZE = 76     // ljt what should this be? 
-                           // we're going with IPV6 + gps max for now
+    MIN_FRAG_SIZE = MIN_SIZE, 
+                          
+
+    // TX_BUFFER_SIZE is the tcp tx buffer size
+    TX_BUFFER_SIZE = MAX_FRAG_SIZE
+    
   };
 
 #endif // _MGEN_GLOBALS

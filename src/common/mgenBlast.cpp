@@ -59,6 +59,9 @@ int main(int argc, char* argv[])
     UINT32 txBufferSize = 0;
     //    INT32 sent = 0;
     MgenMsg theMsg;
+    theMsg.SetChecksumEnabled(false);
+    theMsg.SetIntegrityEnabled(false);
+    
 
     struct sigaction sigHandler;
     sigHandler.sa_handler = signalHandler;
@@ -114,7 +117,6 @@ int main(int argc, char* argv[])
 	    dstAddr.GetHostString(), dstAddr.GetPort());
     
     // Set up the message
-    UINT32 txChecksum = 0;
     int flow_id = 1;
     UINT32 seq_num = 0;
     theMsg.SetFlag(MgenMsg::LAST_BUFFER);
@@ -171,7 +173,7 @@ int main(int argc, char* argv[])
 	theMsg.SetSeqNum(seq_num++);
 	ProtoSystemTime(currentTime);
 	theMsg.SetTxTime(currentTime);
-	len = theMsg.Pack(txBuffer,theMsg.GetMsgLen(),false,txChecksum);
+	len = theMsg.Pack(txBuffer,theMsg.GetMsgLen());
 	if (!clientSocket.SendTo(txBuffer,len,dstAddr))
 	  {
 	    fprintf(stderr, "mgenBlast: error sending to server\n");

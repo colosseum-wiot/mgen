@@ -498,7 +498,8 @@ void MgenPayloadMgr::LogEvent(const char* cmd,const char* val)
       else
 	timePtr = gmtime((time_t*)&currentTime.tv_sec);
       
-      fprintf(log_file,"%02d:%02d:%02d.%06lu app>%s %s\n",
+      fprintf(log_file,"%04d-%02d-%02d_%02d:%02d:%02d.%06lu app>%s %s\n",
+              1900 + timePtr->tm_year, 1 + timePtr->tm_mon, timePtr->tm_mday,
 	      timePtr->tm_hour,timePtr->tm_min,
 	      timePtr->tm_sec,(unsigned long) currentTime.tv_usec,
 	      cmd,val);

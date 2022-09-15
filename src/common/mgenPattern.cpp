@@ -197,7 +197,7 @@ MgenPattern::FileType MgenPattern::GetFileTypeFromString(const char* string)
 } // end MgenPattern::GetFileTypeFromString()
 #endif //_HAVE_PCAP
 
-bool MgenPattern::InitFromString(MgenPattern::Type theType, const char* string,Protocol protocol)
+bool MgenPattern::InitFromString(MgenPattern::Type theType, const char* string, Protocol protocol)
 {
     type = theType;
     switch (type)
@@ -537,7 +537,7 @@ double MgenPattern::RestartPcapRead(double& prevTime)
   if (packet)
     {
       // force minimum mgen length.  (check for ipv6 ultimately)
-      pkt_size = (header.len - 42) > 28 ? (header.len -42) : 28;;
+      pkt_size = (header.len - 42) > MIN_SIZE ? (header.len -42) : MIN_SIZE;;
 
       // calculate interval (A)
       double interval = ((header.ts.tv_sec * 1.0 + header.ts.tv_usec * 1.0e-6) - prevTime);
@@ -656,7 +656,7 @@ double MgenPattern::GetPktInterval()
           if (packet)
           {
               // force minimum mgen length.  (check for ipv6 ultimately)
-              pkt_size = (header.len - 42) > 28 ? (header.len -42) : 28;;
+              pkt_size = (header.len - 42) > MIN_SIZE ? (header.len -42) : MIN_SIZE;;
               
               if (firstPacket)
                 firstPacket = false;

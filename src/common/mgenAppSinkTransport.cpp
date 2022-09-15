@@ -159,18 +159,14 @@ bool MgenAppSinkTransport::Open(ProtoAddress::Type addrType, bool bindOnOpen)
 
 bool MgenAppSinkTransport::SendMessage(MgenMsg& theMsg,const ProtoAddress& dst_addr,char* txBuffer)
 {
-    
-    UINT32 txChecksum = 0;
     unsigned int len = 0;
     theMsg.SetFlag(MgenMsg::LAST_BUFFER);
+    
 
-    len = theMsg.Pack(txBuffer,theMsg.GetMsgLen(),mgen.GetChecksumEnable(),txChecksum);
+    len = theMsg.Pack(txBuffer,theMsg.GetMsgLen());
     
     if (len == 0)
       return false; // no room
-    
-    if (mgen.GetChecksumEnable() && theMsg.FlagIsSet(MgenMsg::CHECKSUM))
-      theMsg.WriteChecksum(txChecksum,(unsigned char*)txBuffer,(UINT32)len);
     
     if (msg_index >= msg_length)
     {

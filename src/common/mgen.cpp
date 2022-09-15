@@ -54,14 +54,17 @@ Mgen::Mgen(ProtoTimerMgr&         timerMgr,
   default_flow_label(0), default_label_lock(false),
   default_tx_buffer(0), default_rx_buffer(0),
   default_broadcast(true), default_tos(0), 
-  default_ttl(3), default_queue_limit(0), 
+  default_ttl(255), default_queue_limit(0), 
   default_broadcast_lock(false),
   default_tos_lock(false), default_ttl_lock(false), 
   default_tx_buffer_lock(false), default_rx_buffer_lock(false), 
   default_interface_lock(false), default_queue_limit_lock(false),
   sink_non_blocking(true),
   log_data(true), log_gps_data(true),
-  checksum_enable(false), 
+  checksum_enable(false),
+  integrity_enable(false),
+  integrity_which_sha(SHA1),
+  integrity_key_len(0),
   addr_type(ProtoAddress::IPv4), 
   get_position(NULL), get_position_data(NULL),
   log_file(NULL), log_binary(false), local_time(false), log_flush(false), 
@@ -81,12 +84,114 @@ Mgen::Mgen(ProtoTimerMgr&         timerMgr,
     sink_path[0] = '\0';
     source_path[0] = '\0';
 
+    memset(integrity_key, 0, sizeof(integrity_key));
 }
 
 Mgen::~Mgen()
 {
     Stop();
     if (save_path) delete save_path;
+}
+
+int Mgen::ReadKeyFromFile(const char *p_filename)
+{
+    int rv = 0;
+    FILE *p_file = NULL;
+    long file_len = 0;
+    long hash_size = 0;
+    size_t num_read = 0;
+    
+    if (p_filename == NULL)
+    {
+        rv = 1;
+        goto exit;
+    }
+
+    p_file = fopen(p_filename, "rb");
+    if (p_file == NULL)
+    {
+        DMSG(0, "NULL filename");
+        rv = 2;
+        goto exit;
+    }
+
+    /* Determine length of file */
+    if (fseek(p_file, 0, SEEK_END))
+    {
+        DMSG(0, "fseek failed\n");
+        rv = 3;
+        goto exit;
+    }
+    file_len = ftell(p_file);
+    rewind(p_file);
+
+    hash_size = USHAHashSize(integrity_which_sha);
+    if (file_len < hash_size)
+    {
+        DMSG(0, "Inadequate key length (must be at least %ld\n", hash_size);
+        rv = 4;
+        goto exit;
+    }
+    
+    if (file_len == hash_size)
+    {
+        num_read = fread(integrity_key, file_len, 1, p_file);
+        if (num_read == 0)
+        {
+            DMSG(0, "fread failed\n");
+            rv = 5;
+            goto exit;
+        }
+    }
+    else
+    {
+        /* Hash the key to get it down to length */
+        USHAContext ctx;
+        uint8_t read_buffer[USHAMaxHashSize] = {0};
+        
+        rv = USHAReset( &ctx, integrity_which_sha);
+        if (rv)
+        {
+            DMSG(0, "USHAReset failed\n");
+            rv = 5;
+            goto exit;
+        }
+        
+        do
+        {
+            num_read = fread(read_buffer, 1, hash_size, p_file);
+            if (num_read == 0)
+            {
+                break;
+            }
+            
+            if (USHAInput(&ctx, read_buffer, num_read))
+            {
+                DMSG(0, "USHAInput failed\n");
+                rv = 6;
+                goto exit;
+            }
+        } while (1);
+
+        if (USHAResult(&ctx, integrity_key))
+        {
+            DMSG(0, "USAHResult failed\n");
+            rv = 7;
+            goto exit;
+        }
+    }
+    integrity_key_len = hash_size;
+    
+exit:
+    if (p_file)
+    {
+        fclose(p_file);
+        p_file = NULL;
+    }
+    return rv;
+
+    
+    
 }
 
 /**
@@ -161,9 +266,10 @@ bool Mgen::Start()
                   timePtr = gmtime((time_t*)&currentTime.tv_sec);
                 
 #endif // if/else _WIN32_WCE
-                Mgen::Log(log_file, "%02d:%02d:%02d.%06lu START Mgen Version %s\n",
-                     timePtr->tm_hour, timePtr->tm_min, 
-                          timePtr->tm_sec, (UINT32)currentTime.tv_usec,MGEN_VERSION);
+                Mgen::Log(log_file, "%04d-%02d-%02d_%02d:%02d:%02d.%06lu START Mgen Version %s\n",
+                          1900 + timePtr->tm_year, 1 + timePtr->tm_mon, timePtr->tm_mday,
+                          timePtr->tm_hour, timePtr->tm_min, 
+                          timePtr->tm_sec, currentTime.tv_usec, MGEN_VERSION);
             }
             if (log_empty) log_empty = false;
             fflush(log_file);
@@ -586,9 +692,10 @@ void Mgen::Stop()
 		  timePtr = gmtime((time_t*)&currentTime.tv_sec);
 
 #endif // if/else _WIN32_WCE
-                Mgen::Log(log_file, "%02d:%02d:%02d.%06lu STOP\n",
-                                   timePtr->tm_hour, timePtr->tm_min, 
-                                   timePtr->tm_sec, (UINT32)currentTime.tv_usec);
+                Mgen::Log(log_file, "%04d-%02d-%02d_%02d:%02d:%02d.%06lu STOP\n",
+                          1900 + timePtr->tm_year, 1 + timePtr->tm_mon, timePtr->tm_mday,
+                          timePtr->tm_hour, timePtr->tm_min, 
+                          timePtr->tm_sec, currentTime.tv_usec);
             }  // end if/else(log_binary)
             
         }  //end if(log_file)
@@ -1269,6 +1376,7 @@ const StringMapper Mgen::COMMAND_LIST[] =
     {"-CHECKSUM",   CHECKSUM},
     {"-TXCHECKSUM", TXCHECKSUM},
     {"-RXCHECKSUM", RXCHECKSUM},
+    {"+INTEGRITY",  INTEGRITY},
     {"+QUEUE",      QUEUE},
     {"+REUSE",      REUSE},
     {"+OFF",        INVALID_COMMAND},  // to deconflict "offset" from "off" event
@@ -1678,6 +1786,15 @@ bool Mgen::OnCommand(Mgen::Command cmd, const char* arg, bool override)
       checksum_enable = true;
       checksum_force = true;
       break;
+
+    case INTEGRITY:
+        if (ReadKeyFromFile(arg))
+        {
+            DMSG(0, "Mgen::OnCommand() - error reading integrity key from file\n");
+            return false;
+        }
+        integrity_enable = true;
+        break;
 
     case QUEUE:	
       int tmpQueueLimit;

@@ -152,7 +152,7 @@ int main(int argc, char* argv[])
         if (!udpPkt.InitFromPacket(ipPkt)) continue;  // not a UDP packet
         
         MgenMsg msg;
-        if (!msg.Unpack((char*)udpPkt.GetPayload(), udpPkt.GetPayloadLength(), false, false))
+        if (!msg.Unpack((char*)udpPkt.GetPayload(), udpPkt.GetPayloadLength(), false))
         {
             fprintf(stderr, "pcap2mgen warning: UDP packet not an MGEN packet?\n");
             continue;

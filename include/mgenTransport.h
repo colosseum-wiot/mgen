@@ -335,8 +335,6 @@ class MgenTcpTransport : public MgenSocketTransport
     UINT16 GetNextTxFragmentSize();
     unsigned int GetRxNumBytes(unsigned int bufferIndex);
     void CopyMsgBuffer(unsigned int numBytes,unsigned int bufferIndex,const char* buffer);
-    void CalcRxChecksum(const char* buffer,unsigned int bufferIndex,unsigned int numBytes);
-    void CalcTxChecksum(); 
     bool IsTransmitting() 
     {
 	    if (tx_msg.GetMsgLen()) 
@@ -364,16 +362,13 @@ class MgenTcpTransport : public MgenSocketTransport
     unsigned int            tx_buffer_pending;
     unsigned int            tx_msg_offset;
     UINT16                  tx_fragment_pending;
-    UINT32                  tx_checksum;
     struct timeval          tx_time; // send time of first tcp fragment
 	
     MgenMsg                 rx_msg;
     char                    rx_msg_buffer[TX_BUFFER_SIZE];
     unsigned int            rx_buffer_index;
-    char                    rx_checksum_buffer[4];
     UINT16                  rx_fragment_pending;
     UINT16                  rx_msg_index;
-    UINT32                  rx_checksum;
 	
 }; // end class MgenTcpTransport
 

@@ -13,9 +13,7 @@ UNIX = ../makefiles
 
 INCLUDES = $(SYSTEM_INCLUDES) -I$(UNIX) -I$(INCLUDE) -I$(PROTOLIB)/include
 
-CFLAGS = -g -DPROTO_DEBUG -DHAVE_GPS -DUNIX -Wall -Wcast-align -pedantic -fPIC $(SYSTEM_HAVES) $(INCLUDES)
-
-#CFLAGS = -g -fno-inline -D_HAVE_PCAP -DPROTO_DEBUG -DHAVE_GPS -DUNIX -Wall -Wcast-align -pedantic  -fPIC $(SYSTEM_HAVES) $(INCLUDES) 
+CFLAGS = -O3 -Wl,-z,relro,-z,now -Wformat -Wformat-security -Werror=format-security -DPROTO_DEBUG -DHAVE_GPS -DUNIX -Wall -Wcast-align -pedantic -fPIC $(SYSTEM_HAVES) $(INCLUDES) -std=c++11 
 
 LDFLAGS = $(SYSTEM_LDFLAGS)
 
@@ -35,12 +33,21 @@ LIBPROTO = $(PROTOLIB)/lib/libprotokit.a
 $(PROTOLIB)/lib/libprotokit.a: 
 	$(MAKE) -C $(PROTOLIB)/makefiles -f Makefile.$(SYSTEM) libprotokit.a
 
-MGEN_SRC = $(COMMON)/mgen.cpp $(COMMON)/mgenEvent.cpp \
-           $(COMMON)/mgenFlow.cpp $(COMMON)/mgenMsg.cpp \
-           $(COMMON)/mgenTransport.cpp $(COMMON)/mgenPattern.cpp \
+MGEN_SRC = $(COMMON)/mgen.cpp \
+           $(COMMON)/mgenEvent.cpp \
+           $(COMMON)/mgenFlow.cpp \
+           $(COMMON)/mgenMsg.cpp \
+           $(COMMON)/mgenTransport.cpp \
+           $(COMMON)/mgenPattern.cpp \
      	   $(COMMON)/mgenPayload.cpp \
            $(COMMON)/mgenSequencer.cpp \
-           $(COMMON)/gpsPub.cpp $(COMMON)/mgenAppSinkTransport.cpp
+           $(COMMON)/gpsPub.cpp \
+           $(COMMON)/mgenAppSinkTransport.cpp \
+           $(COMMON)/hmac.c \
+           $(COMMON)/sha1.c \
+           $(COMMON)/sha224-256.c \
+           $(COMMON)/sha384-512.c \
+           $(COMMON)/usha.c
           
 MGEN_OBJ = $(MGEN_SRC:.cpp=.o)
     
@@ -48,7 +55,7 @@ MGEN_APP_SRC = $(COMMON)/mgenApp.cpp
 MGEN_APP_OBJ = $(MGEN_APP_SRC:.cpp=.o) 
 
 mgen:    $(MGEN_APP_OBJ) $(MGEN_OBJ) $(LIBPROTO)
-	$(CC) -g $(CFLAGS) -o $@ $(MGEN_APP_OBJ) $(MGEN_OBJ) $(LDFLAGS) $(LIBPROTO) $(LIBS) 
+	$(CC) $(CFLAGS) -o $@ $(MGEN_APP_OBJ) $(MGEN_OBJ) $(LDFLAGS) $(LIBPROTO) $(LIBS) 
 
 MPMGR_SRC = $(COMMON)/mpmgr.cpp $(COMMON)/gpsPub.cpp
 

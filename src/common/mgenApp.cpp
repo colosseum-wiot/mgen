@@ -73,6 +73,7 @@ const char* const MgenApp::CMD_LIST[] =
     "+command",    // specifies an input command file/device
     "+hostaddr",   // turn "host" field on/off in sent messages
     "-boost",      // boost process priority
+    "+seed",       // Seed for random number generation (possion & jitter patterns)
     "-help",       // print usage and exit
     "+logdata",    // log optional data attribute? default ON
     "+loggpsdata", // log gps data? default ON
@@ -345,6 +346,18 @@ bool MgenApp::OnCommand(const char* cmd, const char* val)
             return false;
         }
     }
+    else if (!strncmp("seed", lowerCmd, len))
+    {
+        int seed;
+        int result = sscanf(val, "%i", &seed);
+        if (1 != result || seed < 0)
+        {
+            DMSG(0,"MgenApp::OnCommand() - invalid seed value");
+            return false;
+        }
+        srand(seed);
+        DMSG(0,"Seed %d First number: %d\n", seed, rand());
+    }
     else if (!strncmp("instance", lowerCmd, len))
     {
         if (control_pipe.IsOpen())
@@ -449,7 +462,7 @@ bool MgenApp::OnStartup(int argc, const char*const* argv)
     // Seed the system rand() function
     struct timeval currentTime;
     ProtoSystemTime(currentTime);
-    srand(currentTime.tv_usec);
+    srand(currentTime.tv_sec^currentTime.tv_usec);
     
     mgen.SetLogFile(stdout);  // log to stdout by default
     

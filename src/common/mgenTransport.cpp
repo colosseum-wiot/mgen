@@ -290,7 +290,7 @@ void MgenTransport::RemoveFromPendingList()
         
 }  // end MgenTransport::RemoveFromPendingList()
 
-void MgenTransport::LogEvent(LogEventType eventType,MgenMsg* theMsg,const struct timeval& theTime,char* buffer )
+void MgenTransport::LogEvent(LogEventType eventType,MgenMsg* theMsg,const struct timeval& theTime,char* buffer)
 {
     if (!(mgen.GetLogFile()))
       return;  
@@ -843,46 +843,45 @@ void MgenUdpTransport::OnEvent(ProtoSocket& theSocket, ProtoSocket::Event theEve
           unsigned int len = MAX_SIZE;
           ProtoAddress srcAddr;
 
+          
+
           while (theSocket.RecvFrom(buffer, len, srcAddr))
           {
               if (len == 0) break;
 
               MgenMsg theMsg;
+
+              theMsg.SetChecksumEnabled(mgen.GetChecksumForce());
+              if (mgen.GetIntegrityEnabled())
+              {
+                  theMsg.SetIntegrity(mgen.GetIntegrityType(),
+                                      mgen.GetIntegrityKey(),
+                                      mgen.GetIntegrityKeyLen());
+              }
+              else
+              {
+                  theMsg.SetIntegrityEnabled(false);
+              }
+              
+              
               // the socket recvFrom gives us our srcAddr
               // so we need to set it in the msg here
-
               theMsg.SetSrcAddr(srcAddr);
+
               if (mgen.GetLogFile())
               {
                   struct timeval currentTime;
                   ProtoSystemTime(currentTime);
 
-                  if (theMsg.Unpack(buffer, len, mgen.GetChecksumForce(), mgen.GetLogData()))
+                  if (theMsg.Unpack(buffer, len, mgen.GetLogData()))
                   {
-                      if (mgen.GetChecksumForce() || theMsg.FlagIsSet(MgenMsg::CHECKSUM))
-                      {
-                          UINT32 checksum = 0;
-                          theMsg.ComputeCRC32(checksum,(unsigned char*)buffer,len - 4);
-                          checksum = (checksum ^ theMsg.CRC32_XOROT);
-                          UINT32 checksumPosition = len - 4;
-                          UINT32 recvdChecksum;
-                          memcpy(&recvdChecksum,buffer+checksumPosition,4);
-                          recvdChecksum = ntohl(recvdChecksum);
-                          
-                          if (checksum != recvdChecksum)
-                          {
-                              DMSG(0, "MgenUdpTransport::OnEvent() error: checksum failure\n");
-                              theMsg.SetChecksumError();
-                              
-                          }
-                          
-                      }
                       if (theMsg.GetError())
-                        LogEvent(RERR_EVENT,&theMsg,currentTime);
+                          LogEvent(RERR_EVENT,&theMsg,currentTime);
                       else 
-                        LogEvent(RECV_EVENT,&theMsg,currentTime,buffer);
+                          LogEvent(RECV_EVENT,&theMsg,currentTime,buffer);
                   }
-                  else {
+                  else
+                  {
                       LogEvent(RERR_EVENT,&theMsg,currentTime);
                   }
               }
@@ -907,20 +906,19 @@ bool MgenUdpTransport::SendMessage(MgenMsg& theMsg,const ProtoAddress& dst_addr,
     
     // Udp packets are single shot and larger than
     // tcp fragments so use our own tx variables
-    UINT32 txChecksum = 0;
     theMsg.SetFlag(MgenMsg::LAST_BUFFER);
 
     struct timeval currentTime;
     ProtoSystemTime(currentTime);
     theMsg.SetTxTime(currentTime);
 
-    unsigned int len = theMsg.Pack(txBuffer,theMsg.GetMsgLen(),mgen.GetChecksumEnable(),txChecksum);
+    //Set TOS in theMsg
+    theMsg.SetTOS(tos);
+
+    unsigned int len = theMsg.Pack(txBuffer,theMsg.GetMsgLen());
     if (len == 0) 
       return false; // no room
     
-    if (mgen.GetChecksumEnable() && theMsg.FlagIsSet(MgenMsg::CHECKSUM)) 
-      theMsg.WriteChecksum(txChecksum,(unsigned char*)txBuffer,(UINT32)len);
-
     if (!socket.SendTo(txBuffer,len,dst_addr))
     {   
 #ifndef _WIN32_WCE
@@ -939,6 +937,7 @@ bool MgenUdpTransport::SendMessage(MgenMsg& theMsg,const ProtoAddress& dst_addr,
     return true;
 } // end MgenUdpTransport::SendMessage
 
+
 bool MgenUdpTransport::Listen(UINT16 port,ProtoAddress::Type addrType, bool bindOnOpen)
 {
     if (!MgenSocketTransport::Listen(port,addrType,bindOnOpen))
@@ -947,6 +946,8 @@ bool MgenUdpTransport::Listen(UINT16 port,ProtoAddress::Type addrType, bool bind
     return StartInputNotification();
 
 } // end MgenUdpTransport::Listen
+
+
 MgenTcpTransport::MgenTcpTransport(Mgen& theMgen,
                                    Protocol theProtocol,
                                    UINT16 thePort,
@@ -955,17 +956,48 @@ MgenTcpTransport::MgenTcpTransport(Mgen& theMgen,
     is_client(true),
     tx_msg(),
     tx_buffer_index(0),tx_buffer_pending(0),
-    tx_msg_offset(0),tx_fragment_pending(0),tx_checksum(0),
+    tx_msg_offset(0),tx_fragment_pending(0),
     rx_msg(), rx_buffer_index(0),
-    rx_fragment_pending(0),rx_msg_index(0),
-    rx_checksum(0)
-
+    rx_fragment_pending(0),rx_msg_index(0)
 {
-  tx_msg_buffer[0] = '\0';
-  rx_msg_buffer[0] = '\0';
-  rx_checksum_buffer[0] = '\0';
+  memset(tx_msg_buffer, 0, sizeof(tx_msg_buffer));
+  memset(rx_msg_buffer, 0, sizeof(rx_msg_buffer));
 
   tx_msg.SetProtocol(TCP);
+
+  // AK - don't think I need to put the below here, because
+  // the MgenFlow::SendMessage, when constructing a MgenMsg
+  // will set these fields, and MgenTCPTransport::SendMessage
+  // will copy that message into tx_msg
+  /*
+  tx_msg.SetChecksumEnabled(mgen.GetChecksumEnable());
+  if (mgen.GetIntegrityEnabled())
+  {
+      tx_msg.SetIntegrity(mgen.GetIntegrityType(),
+                          mgen.GetIntegrityKey(),
+                          mgen.GetIntegrityKeyLen());
+  }
+  else
+  {
+      tx_msg.SetIntegrityEnabled(false);
+  }
+  */
+
+  // However, I don't see anywhere that creates the rx_msg
+  // except here; looks like the innards just get overwritten
+  // by MgenMsg::Unpack. So set integrity settings here.
+  rx_msg.SetChecksumEnabled(mgen.GetChecksumForce());
+  if (mgen.GetIntegrityEnabled())
+  {
+      rx_msg.SetIntegrity(mgen.GetIntegrityType(),
+                          mgen.GetIntegrityKey(),
+                          mgen.GetIntegrityKeyLen());
+  }
+  else
+  {
+      rx_msg.SetIntegrityEnabled(false);
+  }
+ 
 
   socket.SetListener(this,&MgenTcpTransport::OnEvent);
 
@@ -1139,10 +1171,18 @@ bool MgenTcpTransport::SendMessage(MgenMsg& theMsg,const ProtoAddress& dst_addr,
 
     // Set the transport's tx_msg to the loaded msg
     tx_msg = theMsg; 
+    
+    //Set TOS in theMsg
+    tx_msg.SetTOS(tos);
 
     // Gets the size of the first fragment that should be
-    // sent and packs the message
+    // sent and packs the message.
+    // Note that GetNextTxFragment will increment tx_msg.frag_num
+    // So pre-decrement here so our fragments start at 0 rather
+    // than at 1.
+    tx_msg.SetFragmentNum(-1);
     tx_fragment_pending = GetNextTxFragment();
+
     
     if (!tx_fragment_pending || !tx_buffer_pending) 
       {
@@ -1194,14 +1234,13 @@ bool MgenTcpTransport::SendMessage(MgenMsg& theMsg,const ProtoAddress& dst_addr,
             if (!tx_fragment_pending && tx_msg_offset > 0)
             {
                 // else we've sent everything, clear state and move on
-                UINT32 txChecksum = 0;
-                char txBuffer[MAX_SIZE];     
+                char txBuffer[TX_BUFFER_SIZE] = {0};     
                 // Use the time of the first message fragment sent that
 		// we squirreled away earlier.  Binary logging uses the
 		// tx_time in the message buffer, logfile logging uses
 		// the tx_time passed in.  Should be cleaned up.
 		tx_msg.SetTxTime(tx_time);
-		tx_msg.Pack(txBuffer,MAX_SIZE,mgen.GetChecksumEnable(),txChecksum);
+		tx_msg.Pack(txBuffer,MAX_FRAG_SIZE);
                 LogEvent(SEND_EVENT,&tx_msg,tx_time,txBuffer);
                 ResetTxMsgState();
 		messages_sent++;
@@ -1301,12 +1340,14 @@ void MgenTcpTransport::ShutdownTransport(LogEventType eventType)
 
 void MgenTcpTransport::ResetTxMsgState()
 {  
-    tx_msg_buffer[0] = '\0';
-    tx_buffer_index = tx_buffer_pending = tx_msg_offset = tx_fragment_pending = tx_checksum = 0;
+    memset(tx_msg_buffer, 0, sizeof(tx_msg_buffer));
+        
+    tx_buffer_index = tx_buffer_pending = tx_msg_offset = tx_fragment_pending = 0;
     tx_msg.SetMgenMsgLen(0);
     tx_msg.SetMsgLen(0);
     tx_msg.SetFlowId(0);
     tx_msg.SetSeqNum(0);
+    tx_msg.SetFragmentNum(0);
     tx_msg.ClearError();   
     tx_msg.SetFlag(MgenMsg::CLEAR);
 
@@ -1314,68 +1355,18 @@ void MgenTcpTransport::ResetTxMsgState()
 
 void MgenTcpTransport::ResetRxMsgState()
 {
-    rx_msg_buffer[0] = '\0';
-    memset(rx_checksum_buffer,0,4);
-    rx_checksum_buffer[0] = '\0';  
-    rx_msg_index = rx_checksum = rx_fragment_pending = rx_buffer_index = 0;
+    memset(rx_msg_buffer, 0, sizeof(rx_msg_buffer));
+    rx_msg_index = rx_fragment_pending = rx_buffer_index = 0;
     rx_msg.SetMgenMsgLen(0);
     rx_msg.SetMsgLen(0);
     rx_msg.SetFlowId(0);
     rx_msg.SetSeqNum(0);
+    rx_msg.SetFragmentNum(0);
     rx_msg.ClearError();   
     rx_msg.SetFlag(MgenMsg::CLEAR);
 
 } // MgenTcpTransport::ResetRxMsgState
 
-void MgenTcpTransport::CalcRxChecksum(const char* buffer,unsigned int bufferIndex,unsigned int numBytes)
-{
-    if ((rx_msg_index == rx_msg.GetMsgLen()) && 
-        (rx_msg_index >= MSG_LEN_SIZE)) // and we didn't just get msg_len!
-    {  
-        
-        // We have the whole message
-        if (mgen.GetChecksumForce() || (rx_msg.FlagIsSet(MgenMsg::CHECKSUM))) 
-        {
-            if (numBytes > 4)
-            {
-                unsigned int checksumPosition = (numBytes + bufferIndex) - 4;
-                memcpy(rx_checksum_buffer,buffer+checksumPosition,4);
-                rx_msg.ComputeCRC32(rx_checksum,(unsigned char*)buffer+bufferIndex,numBytes - 4);	
-            }
-            else 
-            {
-                // else our read was split while getting the
-                // checksum - copy the rest of it
-                memcpy(rx_checksum_buffer+rx_buffer_index,buffer+bufferIndex,numBytes);
-            }
-            rx_checksum = (rx_checksum ^ rx_msg.CRC32_XOROT);
-            
-            UINT32 recvdChecksum;
-            memcpy(&recvdChecksum,rx_checksum_buffer,4);
-            recvdChecksum = ntohl(recvdChecksum);
-            
-            if (rx_checksum != recvdChecksum)
-            {
-                DMSG(0, "MgenMsg::Unpack() error: checksum failure\n");
-                rx_msg.SetChecksumError();
-                rx_msg.SetFlag(MgenMsg::CHECKSUM_ERROR);
-            }
-        }
-    } else {
-        unsigned int msgBytes = numBytes;
-        // are we reading part of a checksum?
-        if (rx_msg_index + 4 > rx_msg.GetMsgLen() && 
-            rx_msg.GetMsgLen() != 0)
-        {
-            unsigned int checksumBytes = (rx_msg_index + 4) - rx_msg.GetMsgLen();
-            msgBytes = numBytes - checksumBytes;
-            memcpy(rx_checksum_buffer,buffer+(bufferIndex + msgBytes),checksumBytes);
-            rx_buffer_index += checksumBytes; 
-        }
-        rx_msg.ComputeCRC32(rx_checksum,(unsigned char*)buffer+bufferIndex,msgBytes);
-    }
-    
-} // MgenTcpTransport::CalcRxChecksum
 
 bool MgenTcpTransport::Open(ProtoAddress::Type addrType, bool bindOnOpen)
 {
@@ -1445,6 +1436,7 @@ bool MgenTcpTransport::Accept(ProtoSocket& theSocket)
         if (tx_buffer) socket.SetTxBufferSize(tx_buffer);
         if (rx_buffer) socket.SetRxBufferSize(rx_buffer);
         if (tos) socket.SetTOS(tos);
+
         // no ttl or multicast interface for tcp sockets   
         reference_count++; 
         SetDstAddr(socket.GetDestination()); 
@@ -1507,9 +1499,6 @@ void MgenTcpTransport::OnRecvMsg(unsigned int numBytes,unsigned int bufferIndex,
         rx_fragment_pending -= numBytes;
     }
     
-    // Sets an error if checksum is not correct
-    CalcRxChecksum(buffer,bufferIndex,numBytes);
-    
     // Last fragment in message.  (Only log when 
     // we have whole fragment
     if (rx_msg_index == rx_msg.GetMsgLen() && rx_msg.GetMsgLen() != 0)
@@ -1561,14 +1550,13 @@ bool MgenTcpTransport::GetNextTxBuffer(unsigned int numBytes)
         {
             // Entire message has been sent, log send event
 	    // with the time we squirreled away earlier
-            UINT32 txChecksum = 0;
-	    char txBuffer[MAX_SIZE];    
+	    char txBuffer[TX_BUFFER_SIZE] = {0};    
 	    // Use the time of the first message fragment sent that
 	    // we squirreled away earlier.  Binary logging uses the
 	    // tx_time in the message buffer, logfile logging uses
 	    // the tx_time passed in.  Should be cleaned up.
 	    tx_msg.SetTxTime(tx_time);
-            tx_msg.Pack(txBuffer,MAX_SIZE,mgen.GetChecksumEnable(),txChecksum);
+            tx_msg.Pack(txBuffer,MAX_FRAG_SIZE);
             LogEvent(SEND_EVENT,&tx_msg,tx_time,txBuffer); 
 	    messages_sent++;
             ResetTxMsgState();    
@@ -1585,63 +1573,33 @@ bool MgenTcpTransport::GetNextTxBuffer(unsigned int numBytes)
 
 void MgenTcpTransport::SetupNextTxBuffer()
 {
-
     // last buffer in fragment with room for checksum?
-    if ((mgen.GetChecksumEnable() && (tx_fragment_pending  <= (TX_BUFFER_SIZE - 4)))
-        || (!mgen.GetChecksumEnable() && (tx_fragment_pending <= TX_BUFFER_SIZE)))
+    if ((tx_msg.GetFooterEnabled() && (tx_fragment_pending <= (TX_BUFFER_SIZE - tx_msg.GetFooterLength())))
+        || (!tx_msg.GetFooterEnabled() && (tx_fragment_pending <= TX_BUFFER_SIZE)))
     {
         tx_buffer_pending = tx_fragment_pending;
-        tx_msg.SetFlag(MgenMsg::LAST_BUFFER);
-
-        if (mgen.GetChecksumEnable())
-          CalcTxChecksum();
-
-        tx_msg.ClearFlag(MgenMsg::LAST_BUFFER);
-            
-        if (mgen.GetChecksumEnable()) 
-          tx_msg.WriteChecksum(tx_checksum, (unsigned char*)tx_msg_buffer, tx_fragment_pending);
-
     }
     else 
     {
-        // Create room for checksum.
+        UINT32 footer_len = 0;
+        if (tx_msg.GetFooterEnabled())
+        {
+            footer_len = tx_msg.GetFooterLength();
+        }
 
-        if (mgen.GetChecksumEnable() && ((tx_fragment_pending - TX_BUFFER_SIZE) < 4))
-            tx_buffer_pending = tx_fragment_pending - 4;
+        // Create room for footer.
+        if (tx_msg.GetFooterEnabled() && ((tx_fragment_pending - (UINT32) TX_BUFFER_SIZE) < footer_len))
+            tx_buffer_pending = tx_fragment_pending - footer_len;
         else
             tx_buffer_pending = TX_BUFFER_SIZE;
         
-        if (mgen.GetChecksumEnable())
-          CalcTxChecksum();
     }
     tx_buffer_index = 0;
     tx_msg_offset += tx_buffer_pending;
 
 } // MgenTcpTransport::SetupNextTxBuffer()
 
-void MgenTcpTransport::CalcTxChecksum()
-{
-    if (tx_msg.FlagIsSet(MgenMsg::LAST_BUFFER))
-    {
-        if (tx_buffer_pending < 4) 
-        {
-            DMSG(0,"MgenMsg::PackBuffer Not enough room for checksum!\n");
-            return;
-        }
-        
-        // Don't calc buffer where checksum will be
-        tx_msg.ComputeCRC32(tx_checksum,
-                            (unsigned char*)tx_msg_buffer,
-                            tx_buffer_pending - 4);
-    }
-    else {
-        tx_msg.ComputeCRC32(tx_checksum,
-                            (unsigned char*)tx_msg_buffer,
-                            tx_buffer_pending);
-        
-    }
 
-} // MgenTcpTransport::CalcTxChecksum()
 
 UINT16 MgenTcpTransport::GetNextTxFragment()
 {
@@ -1650,8 +1608,8 @@ UINT16 MgenTcpTransport::GetNextTxFragment()
    */
 
     UINT16 tx_buffer_size = TX_BUFFER_SIZE; 
-    tx_msg_buffer[0] = '\0';
-    tx_checksum = 0;
+    memset(tx_msg_buffer, 0, sizeof(tx_msg_buffer));
+    
     tx_buffer_index = 0;
     
     /** Sets msg_len and segment flags in the fragment for us.
@@ -1670,6 +1628,7 @@ UINT16 MgenTcpTransport::GetNextTxFragment()
     struct timeval currentTime;
     ProtoSystemTime(currentTime);
     tx_msg.SetTxTime(currentTime);
+    tx_msg.IncrementFragmentNum();
 
     /** tx_msg_offset is the index into the mgen message
      * not the fragment.  */
@@ -1678,43 +1637,34 @@ UINT16 MgenTcpTransport::GetNextTxFragment()
     
 
     /* Account for checksum handling and pack the message */
-    if (mgen.GetChecksumEnable()) {
-        
-        if (((tx_msg.msg_len - TX_BUFFER_SIZE) < 4) && (tx_msg.msg_len != MIN_FRAG_SIZE))
-        {
-            tx_buffer_size = TX_BUFFER_SIZE - 4;
-        }
-    }	  
-    
-    // save room for checksum!
-    if (tx_msg.msg_len > TX_BUFFER_SIZE)
-	{
-        tx_buffer_pending = tx_msg.Pack(tx_msg_buffer,tx_buffer_size,mgen.GetChecksumEnable(),tx_checksum);
-        tx_msg_offset += tx_buffer_pending;
-        
-	}
-    else
-
-      if (tx_msg.msg_len > 0)
+    if (tx_msg.GetFooterEnabled())
+    {
+       if (((tx_msg.msg_len - TX_BUFFER_SIZE) < tx_msg.GetFooterLength()) &&
+            (tx_msg.msg_len != MIN_FRAG_SIZE))
        {
-          tx_msg.SetFlag(MgenMsg::LAST_BUFFER);
-          tx_buffer_pending = tx_msg.Pack(tx_msg_buffer,tx_msg.msg_len,mgen.GetChecksumEnable(),tx_checksum);
-          tx_msg_offset += tx_buffer_pending;
-          
-          if (mgen.GetChecksumEnable() && tx_msg.FlagIsSet(MgenMsg::CHECKSUM))
-	      {
-              // We're sending the rest of the fragment and
-              // had room for the checksum so write it.
-              tx_msg.WriteChecksum(tx_checksum,(unsigned char*)tx_msg_buffer,tx_msg.msg_len);
-              
-	      }
+           tx_buffer_size = TX_BUFFER_SIZE - tx_msg.GetFooterLength();
+       }
+    }	  
+    if (tx_msg.msg_len > TX_BUFFER_SIZE)
+    {
+        tx_buffer_pending = tx_msg.Pack(tx_msg_buffer,tx_buffer_size);
+        tx_msg_offset += tx_buffer_pending;
+    }
+    else
+    {
+        if (tx_msg.msg_len > 0)
+        {
+            tx_msg.SetFlag(MgenMsg::LAST_BUFFER);
+            tx_buffer_pending = tx_msg.Pack(tx_msg_buffer,tx_msg.msg_len);
+            tx_msg_offset += tx_buffer_pending;
 	}
-      else
-      {
-          // no more to send
-          tx_buffer_pending = 0;
-	  }
-
+        else
+        {
+            // no more to send
+            tx_buffer_pending = 0;
+        }
+    }
+    
     return tx_msg.msg_len;
     
 } // MgenTcpTransport::GetNextTxFragment
@@ -1792,9 +1742,9 @@ void MgenTcpTransport::CopyMsgBuffer(unsigned int numBytes,unsigned int bufferIn
         if (mgen.GetLogFile()) 
         {
             if (rx_msg_index <= TX_BUFFER_SIZE) 
-              rx_msg.Unpack(rx_msg_buffer,rx_msg_index,mgen.GetChecksumForce(),mgen.GetLogData());
+              rx_msg.Unpack(rx_msg_buffer,rx_msg_index,mgen.GetLogData());
             else
-              rx_msg.Unpack(rx_msg_buffer,TX_BUFFER_SIZE,mgen.GetChecksumForce(),mgen.GetLogData());
+              rx_msg.Unpack(rx_msg_buffer,TX_BUFFER_SIZE,mgen.GetLogData());
         }
     }
     
@@ -1810,7 +1760,7 @@ MgenSinkTransport::MgenSinkTransport(Mgen& theMgen,
     msg_length(0),msg_index(0)
 
 {
-  msg_buffer[0] = '\0';
+  memset(msg_buffer, 0, sizeof(msg_buffer));
   path[0] = '\0';
 }
 
@@ -1827,7 +1777,7 @@ MgenSinkTransport::MgenSinkTransport(Mgen& theMgen,
     msg_length(0),msg_index(0)
 
 {
-  msg_buffer[0] = '\0';
+  memset(msg_buffer, 0, sizeof(msg_buffer));
   path[0] = '\0';
 }
 
@@ -1858,37 +1808,29 @@ void MgenSinkTransport::HandleMgenMessage(const char* buffer, unsigned int len,c
 {
     MgenMsg theMsg;
     theMsg.SetSrcAddr(srcAddr);
+    theMsg.SetChecksumEnabled(mgen.GetChecksumForce());
+    if (mgen.GetIntegrityEnabled())
+    {
+        theMsg.SetIntegrity(mgen.GetIntegrityType(),
+                            mgen.GetIntegrityKey(),
+                            mgen.GetIntegrityKeyLen());
+    }
+    else
+    {
+        theMsg.SetIntegrityEnabled(false);
+    }
+    
     
     if (NULL != mgen.GetLogFile())
     {
         struct timeval currentTime;
         ProtoSystemTime(currentTime);
-        if (theMsg.Unpack(buffer,len,mgen.GetChecksumForce(),mgen.GetLogData()))
-        {
-            if (mgen.GetChecksumForce() || theMsg.FlagIsSet(MgenMsg::CHECKSUM))
-            {
-                UINT32 checksum = 0;
-                theMsg.ComputeCRC32(checksum,
-                                    (unsigned char*)buffer,
-                                    len-4);
-                checksum = (checksum ^ theMsg.CRC32_XOROT);
-                UINT32 checksumPosition = len-4;
-                UINT32 recvdChecksum;
-                memcpy(&recvdChecksum,buffer+checksumPosition,4);
-                recvdChecksum = ntohl(recvdChecksum);
-                
-                if (checksum != recvdChecksum)
-                {
-                    DMSG(0,"MgenSinkTransport::HandleMgenMessage() error: checksum failure.\n");
-                    theMsg.SetChecksumError();
-                }
-            }
-        }
+        theMsg.Unpack(buffer,len,mgen.GetLogData());
         char* txBuffer = const_cast<char*>(buffer); // ljt fix me    
         if (theMsg.GetError())
           LogEvent(RERR_EVENT,&theMsg,currentTime);
         else 
-          LogEvent(RECV_EVENT,&theMsg,currentTime,txBuffer);        
+          LogEvent(RECV_EVENT,&theMsg,currentTime,txBuffer);
     }
   
 } // end MgenSinkTransport::HandleMgenMessage
