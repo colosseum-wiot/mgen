@@ -1,5 +1,5 @@
 # protolib
-protolib/
+#protolib/
 
 # build executables
 makefiles/mgen
@@ -13,3 +13,5 @@ makefiles/mpmgr
 .Trashes
 ehthumbs.db
 Thumbs.db
+
+.*swp*

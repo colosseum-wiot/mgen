@@ -1,4 +1,29 @@
-Release notes for Kudu MGEN enhancements.
+This project is forked from upstream mgen, with patches applied by Kudu Dynamics during SC2.
+
+# Upgrading to Ubuntu 20.04
+The goal is to retain functionality from the Kudu release. We also need to
+upgrade the underlying OS.
+
+### Patch
+We only want to apply minimal patches to get mgen to build. Thus we have
+applied the following patches:
+* https://sources.debian.org/data/main/m/mgen/5.02.b%2Bdfsg1-2.2/debian/patches/100-ld-as-needed.patch
+* https://sources.debian.org/data/main/m/mgen/5.02.b%2Bdfsg1-2.2/debian/patches/400-nolibpcap.patch
+* https://sources.debian.org/data/main/m/mgen/5.02.b%2Bdfsg1-2.2/debian/patches/gcc7.patch
+
+### Add protolib
+Download from here:
+https://sources.debian.org/data/main/m/mgen/5.02.b%2Bdfsg1-2.2/protolib/
+
+In theory, it would be better to download this from source, e.g. from NRL. That
+said, The Debian build has this included, so we also include it manually here.
+
+### Build
+For actual build commands, see [Colosseum mgen
+repo](https://github.com/colosseum-wiot/armory-traffic-generation) colosseum
+branches, specifically `containers/mgen/Dockerfile`.
+
+# Release notes for Kudu MGEN enhancements
 
 2018_06_28:
  * Removed bad casts of the timeval.tv_usec field in Mgen::Log function to prevent bad data from being printed to the
